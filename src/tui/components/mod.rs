@@ -4,6 +4,8 @@ pub mod plan;
 pub mod progress;
 pub mod wizard;
 
+pub use chat::ChatPanel;
+
 use ratatui::Frame;
 
 pub trait Component {
