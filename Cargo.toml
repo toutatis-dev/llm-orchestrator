@@ -4,3 +4,70 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+
+# TUI framework
+ratatui = "0.29"
+crossterm = "0.28"
+
+# HTTP + SSE
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
+reqwest-retry = "0.7"
+reqwest-middleware = "0.4"
+eventsource-stream = "0.2"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Configuration and paths
+dirs = "5.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Tracing/logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Git operations
+git2 = "0.19"
+
+# File watching
+notify = "6.1"
+
+# Progress bars
+indicatif = "0.17"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Regex
+regex = "1.10"
+
+# Decimal for precise cost calculation
+rust_decimal = "1.35"
+
+# Keyring for secure API key storage
+keyring = "3.0"
+
+# Rate limiting with tokio support
+backoff = { version = "0.4", features = ["tokio"] }
+
+# Synchronization primitives
+parking_lot = "0.12"
+
+# Random for jitter
+rand = "0.8"
