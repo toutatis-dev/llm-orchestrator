@@ -1,4 +1,5 @@
-use crate::core::{ChatMessage, ExecutionPlan, ExecutionProgress};
+use crate::core::{ChatMessage, ExecutionPlan};
+use crate::executor::progress::ExecutionProgress;
 use chrono::{DateTime, Local};
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind};
 use std::time::Duration;

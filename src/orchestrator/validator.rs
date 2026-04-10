@@ -1,4 +1,4 @@
-use crate::core::{ExecutionPlan, ValidationError};
+use crate::core::{plan::ValidationError, ExecutionPlan};
 
 pub struct PlanValidator {
     max_attempts: usize,

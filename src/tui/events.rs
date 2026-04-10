@@ -1,4 +1,4 @@
-use crossterm::event::{KeyEvent, MouseEvent};
+use crossterm::event::{self, KeyEvent, MouseEvent};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -60,13 +60,13 @@ impl EventHandler {
                 // Poll for terminal events
                 if crossterm::event::poll(Duration::from_millis(0)).unwrap_or(false) {
                     match crossterm::event::read() {
-                        Ok(CrosstermEvent::Key(key)) => {
+                        Ok(event::Event::Key(key)) => {
                             let _ = tx_clone.send(Event::Key(key));
                         }
-                        Ok(CrosstermEvent::Mouse(mouse)) => {
+                        Ok(event::Event::Mouse(mouse)) => {
                             let _ = tx_clone.send(Event::Mouse(mouse));
                         }
-                        Ok(CrosstermEvent::Resize(w, h)) => {
+                        Ok(event::Event::Resize(w, h)) => {
                             let _ = tx_clone.send(Event::Resize(w, h));
                         }
                         _ => {}
