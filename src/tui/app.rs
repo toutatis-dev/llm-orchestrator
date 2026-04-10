@@ -67,15 +67,11 @@ impl App {
     pub async fn run(&mut self, terminal: &mut super::Tui) -> anyhow::Result<()> {
         let mut event_handler = EventHandler::new();
         
-        // Initial draw
-        terminal.draw(|f| {
-            let size = f.area();
-            let text = ratatui::widgets::Paragraph::new("LLM Orchestrator - Press 'q' to quit");
-            f.render_widget(text, size);
-        })?;
-        
         // Main event loop
         while !self.should_quit {
+            // Draw UI
+            terminal.draw(|f| self.draw(f))?;
+            
             // Handle events
             if let Some(event) = event_handler.next().await {
                 match event {
@@ -84,19 +80,40 @@ impl App {
                     _ => {}
                 }
             }
-            
-            // Redraw
-            terminal.draw(|f| {
-                let size = f.area();
-                let text = ratatui::widgets::Paragraph::new(format!(
-                    "LLM Orchestrator\nState: {:?}\nPress 'q' to quit",
-                    std::mem::discriminant(&self.state)
-                ));
-                f.render_widget(text, size);
-            })?;
         }
         
         Ok(())
+    }
+    
+    fn draw(&self, frame: &mut ratatui::Frame) {
+        use super::layout::{split_content, MainLayout};
+        
+        let layout = MainLayout::new(frame);
+        
+        // Header
+        let mode = match &self.state {
+            AppState::Idle => "Idle",
+            AppState::Discovery { .. } => "Discovery",
+            AppState::Planning { .. } => "Planning",
+            AppState::Executing { .. } => "Executing",
+            AppState::Paused { .. } => "Paused",
+            AppState::Complete { .. } => "Complete",
+        };
+        layout.render_header(frame, &format!("LLM Orchestrator - Mode: {}", mode));
+        
+        // Content area
+        let (main_area, side_area) = split_content(layout.content, false);
+        
+        // Main content placeholder
+        let content = ratatui::widgets::Paragraph::new("Welcome to LLM Orchestrator\n\nPress 'q' to quit")
+            .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL));
+        frame.render_widget(content, main_area);
+        
+        // Input area
+        layout.render_input(frame, "", false);
+        
+        // Footer
+        layout.render_footer(frame, "Press 'q' to quit | '?' for help");
     }
     
     pub fn on_key(&mut self, key: KeyEvent) {
