@@ -1,6 +1,7 @@
 use crate::models::types::*;
 use anyhow::Result;
 use reqwest::Client;
+use reqwest::Response;
 
 pub struct OpenRouterClient {
     client: Client,
@@ -32,6 +33,27 @@ impl OpenRouterClient {
         if response.status().is_success() {
             let result = response.json().await?;
             Ok(result)
+        } else {
+            let error_text = response.text().await?;
+            Err(anyhow::anyhow!("API error: {}", error_text))
+        }
+    }
+    
+    pub async fn complete_streaming(&self, request: CompletionRequest) -> Result<Response> {
+        let url = format!("{}/chat/completions", self.base_url);
+        
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .json(&request)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            Ok(response)
         } else {
             let error_text = response.text().await?;
             Err(anyhow::anyhow!("API error: {}", error_text))
