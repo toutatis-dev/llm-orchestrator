@@ -1,9 +1,8 @@
 use crate::core::{ChatMessage, ExecutionPlan};
 use crate::executor::progress::ExecutionProgress;
+use crate::tui::events::{Event, EventHandler};
 use chrono::{DateTime, Local};
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind};
-use std::time::Duration;
-use tokio::sync::mpsc;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 pub enum AppState {
     Idle,
@@ -65,10 +64,38 @@ impl App {
         Self::default()
     }
     
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        // TODO: Initialize terminal and run event loop
-        println!("TUI framework initialized");
-        println!("App state: {:?}", std::mem::discriminant(&self.state));
+    pub async fn run(&mut self, terminal: &mut super::Tui) -> anyhow::Result<()> {
+        let mut event_handler = EventHandler::new();
+        
+        // Initial draw
+        terminal.draw(|f| {
+            let size = f.area();
+            let text = ratatui::widgets::Paragraph::new("LLM Orchestrator - Press 'q' to quit");
+            f.render_widget(text, size);
+        })?;
+        
+        // Main event loop
+        while !self.should_quit {
+            // Handle events
+            if let Some(event) = event_handler.next().await {
+                match event {
+                    Event::Key(key) => self.on_key(key),
+                    Event::Tick => {}
+                    _ => {}
+                }
+            }
+            
+            // Redraw
+            terminal.draw(|f| {
+                let size = f.area();
+                let text = ratatui::widgets::Paragraph::new(format!(
+                    "LLM Orchestrator\nState: {:?}\nPress 'q' to quit",
+                    std::mem::discriminant(&self.state)
+                ));
+                f.render_widget(text, size);
+            })?;
+        }
+        
         Ok(())
     }
     

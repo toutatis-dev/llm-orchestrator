@@ -1,6 +1,6 @@
 use clap::Parser;
 use llm_orchestrator::cli::Cli;
-use llm_orchestrator::tui::App;
+use llm_orchestrator::tui::{App, init_terminal, restore_terminal};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,14 +8,20 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     
     // Parse CLI arguments
-    let cli = Cli::parse();
+    let _cli = Cli::parse();
     
     // Initialize the orchestrator
     llm_orchestrator::init().await?;
     
+    // Initialize terminal
+    let mut terminal = init_terminal()?;
+    
     // Run TUI app
     let mut app = App::new();
-    app.run().await?;
+    let result = app.run(&mut terminal).await;
     
-    Ok(())
+    // Restore terminal regardless of result
+    restore_terminal()?;
+    
+    result
 }
