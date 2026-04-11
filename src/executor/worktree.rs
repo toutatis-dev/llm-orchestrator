@@ -14,6 +14,7 @@ pub struct WorktreeManager {
 }
 
 /// Represents a worker's isolated worktree
+#[derive(Clone)]
 pub struct WorkerWorktree {
     pub path: PathBuf,
     pub branch: String,
