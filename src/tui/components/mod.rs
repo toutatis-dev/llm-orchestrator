@@ -5,6 +5,7 @@ pub mod progress;
 pub mod wizard;
 
 pub use chat::ChatPanel;
+pub use plan::PlanPanel;
 
 use ratatui::Frame;
 
