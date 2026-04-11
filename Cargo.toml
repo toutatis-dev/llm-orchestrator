@@ -71,3 +71,6 @@ parking_lot = "0.12"
 
 # Random for jitter
 rand = "0.8"
+
+# Directory traversal
+walkdir = "2.5"
