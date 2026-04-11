@@ -6,6 +6,7 @@ pub mod wizard;
 
 pub use chat::ChatPanel;
 pub use plan::PlanPanel;
+pub use wizard::{WizardAction, WizardPanel, WizardState};
 
 use ratatui::Frame;
 
