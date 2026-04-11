@@ -4,6 +4,7 @@
 //! for planning and distributes work to smaller models (Qwen 3.5 series) 
 //! to parallelize tasks and improve efficiency.
 
+pub mod api_key;
 pub mod cli;
 pub mod config;
 pub mod core;
@@ -16,6 +17,7 @@ pub mod watcher;
 
 pub use config::Config;
 pub use core::{ExecutionPlan, Task, TaskBatch};
+pub use orchestrator::{OrchestratorClient, Planner};
 
 use std::path::Path;
 
@@ -30,4 +32,21 @@ pub async fn init() -> anyhow::Result<()> {
     }
     
     Ok(())
+}
+
+/// Create a configured Planner instance
+/// 
+/// This uses the API key from environment or keyring, and the model
+/// configuration from the Config.
+pub fn create_planner(config: &Config) -> anyhow::Result<Planner> {
+    use crate::api_key::resolve_api_key;
+    
+    let api_key = resolve_api_key()?;
+    let client = OrchestratorClient::new(
+        api_key,
+        &config.orchestrator.model,
+        config.orchestrator.temperature,
+    );
+    
+    Ok(Planner::new(client))
 }
