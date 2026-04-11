@@ -1,7 +1,7 @@
 use crate::config::Config;
-use crate::core::{ChatMessage, ExecutionPlan, Role};
+use crate::core::{ChatMessage, ExecutionPlan, PlanStatus, Role};
 use crate::executor::progress::ExecutionProgress;
-use crate::tui::components::ChatPanel;
+use crate::tui::components::{ChatPanel, PlanPanel, WizardAction, WizardPanel, WizardState};
 use crate::tui::events::{Event, EventHandler};
 use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -21,7 +21,9 @@ pub enum AppState {
     Planning {
         session_id: String,
         plan: ExecutionPlan,
-        approval_mode: ApprovalMode,
+        wizard_state: WizardState,
+        plan_panel: PlanPanel,
+        wizard_panel: WizardPanel,
     },
     Executing {
         session_id: String,
@@ -39,11 +41,6 @@ pub enum AppState {
         message: String,
         previous_state: Box<AppState>,
     },
-}
-
-pub enum ApprovalMode {
-    WholePlan,
-    Granular { current_batch: usize },
 }
 
 #[derive(Debug)]
@@ -120,10 +117,14 @@ impl App {
             AppState::Idle => ("Idle", "".to_string()),
             AppState::Discovery { .. } => ("Discovery", "Chat with the orchestrator".to_string()),
             AppState::GeneratingPlan { .. } => ("Planning", "Generating plan...".to_string()),
-            AppState::Planning { plan, .. } => (
-                "Planning",
-                format!("Plan: {} batches", plan.batches.len()),
-            ),
+            AppState::Planning { plan, wizard_state, .. } => {
+                let approved = wizard_state.approved_count();
+                let total = plan.batches.len();
+                (
+                    "Planning",
+                    format!("Plan Review: {}/{} batches approved", approved, total),
+                )
+            }
             AppState::Executing { progress, .. } => (
                 "Executing",
                 format!("Batch {}/{}", progress.current_batch, progress.total_batches),
@@ -140,6 +141,22 @@ impl App {
         match &self.state {
             AppState::Discovery { chat, .. } | AppState::GeneratingPlan { chat, .. } => {
                 chat.render(frame, main_area);
+            }
+            AppState::Planning {
+                plan,
+                wizard_state,
+                plan_panel,
+                wizard_panel,
+                ..
+            } => {
+                // Split main area into plan view (left) and wizard (right)
+                let chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Horizontal)
+                    .constraints([ratatui::layout::Constraint::Percentage(50), ratatui::layout::Constraint::Percentage(50)])
+                    .split(main_area);
+
+                plan_panel.render(frame, chunks[0], plan);
+                wizard_panel.render(frame, chunks[1], plan, wizard_state);
             }
             _ => {
                 // Placeholder for other states
@@ -163,6 +180,7 @@ impl App {
         let help_text = match &self.state {
             AppState::Discovery { .. } => "Enter: Send | Shift+Enter: Newline | ↑/↓: Scroll | q: Quit",
             AppState::GeneratingPlan { .. } => "Generating plan, please wait...",
+            AppState::Planning { .. } => "Enter: Approve | r: Reject | n/p: Next/Prev | a: Approve All | d: Details | q: Quit",
             AppState::Error { .. } => "Press Enter to dismiss error | q: Quit",
             _ => "Press 'q' to quit | '?' for help",
         };
@@ -263,6 +281,49 @@ impl App {
             AppState::GeneratingPlan { .. } => {
                 // Block input while generating
             }
+            AppState::Planning { plan, wizard_state, session_id, .. } => {
+                let session_id = session_id.clone();
+                match key.code {
+                    KeyCode::Enter => {
+                        if wizard_state.all_approved() {
+                            // Update plan status
+                            let mut plan = std::mem::replace(plan, ExecutionPlan::new(String::new()));
+                            plan.status = PlanStatus::Approved;
+                            
+                            self.state = AppState::Executing {
+                                session_id,
+                                progress: ExecutionProgress {
+                                    current_batch: 0,
+                                    total_batches: plan.batches.len(),
+                                    tasks_completed: 0,
+                                    total_tasks: plan.batches.iter().map(|b| b.tasks.len()).sum(),
+                                },
+                            };
+                        } else {
+                            wizard_state.approve_current();
+                        }
+                    }
+                    KeyCode::Char('r') => {
+                        wizard_state.reject_current();
+                    }
+                    KeyCode::Char('a') => {
+                        wizard_state.approve_all();
+                    }
+                    KeyCode::Char('n') => {
+                        wizard_state.next_batch(plan);
+                    }
+                    KeyCode::Char('p') => {
+                        wizard_state.previous_batch();
+                    }
+                    KeyCode::Char('d') => {
+                        wizard_state.toggle_detail();
+                    }
+                    KeyCode::Char('q') => {
+                        self.should_quit = true;
+                    }
+                    _ => {}
+                }
+            }
             _ => {
                 // Other states - basic navigation
                 match key.code {
@@ -275,22 +336,20 @@ impl App {
 
     fn on_plan_generated(&mut self, plan: ExecutionPlan) {
         match &mut self.state {
-            AppState::GeneratingPlan { session_id, chat, .. } => {
-                chat.add_message(ChatMessage::new(
-                    Role::Orchestrator,
-                    format!(
-                        "Plan generated successfully!\n\n{}",
-                        plan.analysis
-                    ),
-                ));
-
-                // Transition to Planning state
+            AppState::GeneratingPlan { session_id, .. } => {
+                // Transition to Planning state with wizard
                 let session_id = session_id.clone();
-                let _chat = chat.clone();
+                
+                let wizard_state = WizardState::new(&plan);
+                let plan_panel = PlanPanel::new();
+                let wizard_panel = WizardPanel::new();
+                
                 self.state = AppState::Planning {
                     session_id,
                     plan,
-                    approval_mode: ApprovalMode::WholePlan,
+                    wizard_state,
+                    plan_panel,
+                    wizard_panel,
                 };
             }
             _ => {
