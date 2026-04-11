@@ -351,8 +351,15 @@ async fn execute_task(
 fn build_system_prompt(task: &Task) -> String {
     format!(
         "You are a software development assistant. Your task is: {}\n\n\
-         Task type: {:?}\n\
-         You should produce code/files as output. Format your response with clear file delimiters.",
+         Task type: {:?}\n\n\
+         Output each file as a fenced code block where the opening fence is followed \
+         immediately by the file path. For example:\n\n\
+         ```src/main.rs\n\
+         fn main() {{\n\
+             println!(\"Hello, world!\");\n\
+         }}\n\
+         ```\n\n\
+         You can output multiple files by including multiple code blocks.",
         task.description,
         task.task_type
     )
@@ -384,38 +391,67 @@ async fn write_task_output(
     content: &str,
 ) -> Result<Vec<std::path::PathBuf>> {
     let mut files_written = Vec::new();
+    let mut lines = content.lines().peekable();
 
-    // Simple file extraction - look for ```filename``` blocks
-    // In a real implementation, we'd use a proper parser
-    for line in content.lines() {
-        if line.starts_with("```") && !line.starts_with("```\n") && !line.starts_with("``` ") {
-            let filename = line.trim_start_matches("`").trim_end_matches("`");
-            if !filename.is_empty() && !filename.starts_with("language") {
-                let file_path = worktree.path.join(filename);
-                
-                // Ensure parent directory exists
-                if let Some(parent) = file_path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-                
-                // For now, just create the file with a placeholder
-                // In practice, we'd extract the content from the markdown block
-                tokio::fs::write(&file_path, b"# Generated content\n").await?;
-                files_written.push(file_path);
+    while let Some(line) = lines.next() {
+        // Look for opening fence: ```filename
+        if line.starts_with("```") && line.len() > 3 {
+            let remainder = &line[3..];
+            // Skip language tags that don't look like paths
+            if remainder.is_empty() || remainder.starts_with("language") {
+                continue;
             }
-        }
-    }
+            
+            // Extract filename
+            let filename = remainder.trim();
+            if filename.is_empty() {
+                continue;
+            }
 
-    // If no files were extracted but we have expected outputs, create them
-    if files_written.is_empty() && !task.expected_outputs.is_empty() {
-        for output in &task.expected_outputs {
-            let file_path = worktree.path.join(output);
+            // Collect content until closing fence
+            let mut file_content = String::new();
+            let mut found_closing = false;
+            
+            while let Some(content_line) = lines.next() {
+                if content_line == "```" {
+                    found_closing = true;
+                    break;
+                }
+                if !file_content.is_empty() {
+                    file_content.push('\n');
+                }
+                file_content.push_str(content_line);
+            }
+
+            if !found_closing {
+                tracing::warn!("Unclosed code block for file: {}", filename);
+            }
+
+            // Write the file
+            let file_path = worktree.path.join(filename);
+            
+            // Ensure parent directory exists
             if let Some(parent) = file_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            tokio::fs::write(&file_path, content.as_bytes()).await?;
+            
+            tokio::fs::write(&file_path, file_content.as_bytes()).await?;
+            tracing::info!("Wrote file: {:?} ({} bytes)", file_path, file_content.len());
             files_written.push(file_path);
         }
+    }
+
+    // If no files were extracted but we have expected outputs, fall back to writing
+    // the entire response to the first expected output
+    if files_written.is_empty() && !task.expected_outputs.is_empty() {
+        let output = &task.expected_outputs[0];
+        let file_path = worktree.path.join(output);
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&file_path, content.as_bytes()).await?;
+        tracing::info!("Wrote fallback file: {:?}", file_path);
+        files_written.push(file_path);
     }
 
     Ok(files_written)
