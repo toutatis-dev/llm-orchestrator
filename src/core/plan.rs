@@ -2,7 +2,7 @@ use crate::core::{BatchId, CostEstimate, Task, TaskId, WorkerTier};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// A batch of tasks that can be executed in parallel
@@ -59,11 +59,14 @@ pub enum ValidationError {
         file: std::path::PathBuf,
     },
 
-    #[error("Invalid batch dependency: batch {0} depends on non-existent batch {1}")]
-    InvalidDependency(BatchId, BatchId),
+    #[error("Batch {batch_id} depends on non-existent batch {dependency_id}")]
+    MissingDependency {
+        batch_id: BatchId,
+        dependency_id: BatchId,
+    },
 
-    #[error("Circular dependency detected in batches")]
-    CircularDependency,
+    #[error("Circular dependency detected involving batch {batch_id}")]
+    CircularDependency { batch_id: BatchId },
 }
 
 impl ExecutionPlan {
@@ -97,9 +100,104 @@ impl ExecutionPlan {
             }
         }
 
-        // TODO: Validate dependencies exist and no circular deps
+        // Validate dependencies exist and no circular deps
+        self.validate_dependencies()?;
 
         Ok(())
+    }
+
+    /// Validate that all dependencies exist and there are no cycles
+    fn validate_dependencies(&self) -> Result<(), ValidationError> {
+        let batch_ids: HashSet<BatchId> = self.batches.iter().map(|b| b.id).collect();
+
+        // Check all dependencies exist
+        for batch in &self.batches {
+            for dep_id in &batch.dependencies {
+                if !batch_ids.contains(dep_id) {
+                    return Err(ValidationError::MissingDependency {
+                        batch_id: batch.id,
+                        dependency_id: *dep_id,
+                    });
+                }
+            }
+        }
+
+        // Check for circular dependencies using Kahn's algorithm
+        if let Err(cycle_batch) = self.topological_sort() {
+            return Err(ValidationError::CircularDependency {
+                batch_id: cycle_batch,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Sort batches in topological order (dependencies first)
+    ///
+    /// Uses Kahn's algorithm. Returns Err(batch_id) if a cycle is detected.
+    pub fn topological_sort(&self) -> Result<Vec<&TaskBatch>, BatchId> {
+        let mut in_degree: HashMap<BatchId, usize> = HashMap::new();
+        let mut graph: HashMap<BatchId, Vec<BatchId>> = HashMap::new();
+
+        // Initialize in-degrees
+        for batch in &self.batches {
+            in_degree.entry(batch.id).or_insert(0);
+            for dep in &batch.dependencies {
+                *in_degree.entry(batch.id).or_insert(0) += 1;
+                graph.entry(*dep).or_default().push(batch.id);
+            }
+        }
+
+        // Find all nodes with in-degree 0
+        let mut queue: Vec<BatchId> = in_degree
+            .iter()
+            .filter(|(_, deg)| **deg == 0)
+            .map(|(&id, _)| id)
+            .collect();
+
+        let mut sorted = Vec::new();
+
+        while let Some(batch_id) = queue.pop() {
+            // Find the batch
+            if let Some(batch) = self.batches.iter().find(|b| b.id == batch_id) {
+                sorted.push(batch);
+            }
+
+            // Reduce in-degree of neighbors
+            if let Some(neighbors) = graph.get(&batch_id) {
+                for &neighbor in neighbors {
+                    if let Some(deg) = in_degree.get_mut(&neighbor) {
+                        *deg -= 1;
+                        if *deg == 0 {
+                            queue.push(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if all batches were sorted (no cycle)
+        if sorted.len() != self.batches.len() {
+            // Find a batch that's part of a cycle
+            let sorted_ids: HashSet<BatchId> = sorted.iter().map(|b| b.id).collect();
+            let cycle_batch = self
+                .batches
+                .iter()
+                .find(|b| !sorted_ids.contains(&b.id))
+                .map(|b| b.id)
+                .unwrap_or(0);
+            return Err(cycle_batch);
+        }
+
+        Ok(sorted)
+    }
+
+    /// Get batch IDs in topological order (dependencies first)
+    ///
+    /// Returns Err(batch_id) if a cycle is detected.
+    pub fn topological_sort_ids(&self) -> Result<Vec<BatchId>, BatchId> {
+        let sorted = self.topological_sort()?;
+        Ok(sorted.into_iter().map(|b| b.id).collect())
     }
 
     /// Save plan to markdown file

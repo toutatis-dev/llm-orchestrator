@@ -64,8 +64,14 @@ impl Executor {
 
         plan.status = crate::core::PlanStatus::InProgress;
 
-        // Process batches in order, respecting dependencies
-        for batch in &mut plan.batches {
+        // Sort batches topologically (dependencies first)
+        let sorted_ids = plan.topological_sort_ids()
+            .map_err(|batch_id| anyhow::anyhow!("Circular dependency detected in batch {}", batch_id))?;
+
+        // Process batches in topological order
+        for batch_id in sorted_ids {
+            let batch = plan.batches.iter_mut().find(|b| b.id == batch_id)
+                .expect("Batch from topological sort must exist");
             // Check if all dependencies are satisfied
             let deps_satisfied = batch.dependencies.iter().all(|dep_id| {
                 completed_batches.contains_key(dep_id)
