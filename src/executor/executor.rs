@@ -1,5 +1,7 @@
+use crate::cancellation::CancellationToken;
 use crate::config::Config;
 use crate::core::{BatchStatus, ExecutionPlan, Task, TaskBatch, WorkerTier};
+use crate::executor::retry::{RetryHandler, RetryResult};
 use crate::executor::worktree::{WorktreeManager, WorkerWorktree};
 use crate::git::branch::BranchManager;
 use crate::models::openrouter::OpenRouterClient;
@@ -7,6 +9,7 @@ use crate::models::types::{CompletionRequest, Message};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// Result of executing a single task
@@ -58,7 +61,11 @@ impl Executor {
     }
 
     /// Execute a complete plan by running batches in dependency order
-    pub async fn execute_plan(&mut self, plan: &mut ExecutionPlan) -> Result<Vec<BatchResult>> {
+    pub async fn execute_plan(
+        &mut self,
+        plan: &mut ExecutionPlan,
+        token: &CancellationToken,
+    ) -> Result<Vec<BatchResult>> {
         let mut batch_results = Vec::new();
         let mut completed_batches: HashMap<usize, String> = HashMap::new(); // batch_id -> commit_sha
 
@@ -70,8 +77,12 @@ impl Executor {
 
         // Process batches in topological order
         for batch_id in sorted_ids {
+            // Check for cancellation before each batch
+            token.check().map_err(|e| anyhow::anyhow!("Execution cancelled: {}", e))?;
+
             let batch = plan.batches.iter_mut().find(|b| b.id == batch_id)
                 .expect("Batch from topological sort must exist");
+            
             // Check if all dependencies are satisfied
             let deps_satisfied = batch.dependencies.iter().all(|dep_id| {
                 completed_batches.contains_key(dep_id)
@@ -100,7 +111,7 @@ impl Executor {
                 });
 
             // Execute the batch
-            let result = self.execute_batch(batch, &base_branch).await?;
+            let result = self.execute_batch(batch, &base_branch, token).await?;
             batch_results.push(result.clone());
 
             if result.success {
@@ -134,6 +145,7 @@ impl Executor {
         &mut self,
         batch: &TaskBatch,
         base_branch: &str,
+        token: &CancellationToken,
     ) -> Result<BatchResult> {
         tracing::info!(
             "Executing batch {} with {} tasks (tier: {:?})",
@@ -141,6 +153,13 @@ impl Executor {
             batch.tasks.len(),
             batch.tier
         );
+
+        // Create shared API client
+        let api_key = crate::api_key::resolve_api_key()?;
+        let client = Arc::new(OpenRouterClient::new(api_key));
+
+        // Check cancellation before creating worktrees
+        token.check().map_err(|e| anyhow::anyhow!("Cancelled before batch {}: {}", batch.id, e))?;
 
         // Create worktrees for all tasks in parallel
         let worktrees: Vec<WorkerWorktree> = batch
@@ -160,10 +179,13 @@ impl Executor {
         let mut handles: Vec<JoinHandle<Result<TaskResult>>> = Vec::new();
 
         for (task, worktree) in batch.tasks.iter().zip(worktrees.clone()) {
+            token.check().map_err(|e| anyhow::anyhow!("Cancelled during batch {}: {}", batch.id, e))?;
+            
             let task = task.clone();
             let config = self.config.clone();
+            let client = client.clone();
             let handle = tokio::spawn(async move {
-                execute_task(&task, &worktree, &config).await
+                execute_task(&task, &worktree, &config, client).await
             });
             handles.push(handle);
         }
@@ -287,6 +309,7 @@ async fn execute_task(
     task: &Task,
     worktree: &WorkerWorktree,
     config: &Config,
+    client: Arc<OpenRouterClient>,
 ) -> Result<TaskResult> {
     tracing::info!("Executing task {}: {}", task.id, task.description);
 
@@ -294,10 +317,6 @@ async fn execute_task(
     let tier_config = config.tiers.get(&format!("{:?}", task.tier).to_lowercase())
         .or_else(|| config.tiers.get("simple"))
         .context("No tier configuration found")?;
-
-    // Create API client
-    let api_key = crate::api_key::resolve_api_key()?;
-    let client = OpenRouterClient::new(api_key);
 
     // Build completion request
     let request = CompletionRequest {

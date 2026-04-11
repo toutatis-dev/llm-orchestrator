@@ -424,9 +424,11 @@ impl App {
     /// Start execution of the plan
     fn start_execution(&mut self, mut plan: ExecutionPlan, session_id: String) {
         use crate::executor::executor::Executor;
+        use crate::cancellation::CancellationToken;
         use std::sync::Arc;
 
         let event_tx = self.event_tx.clone();
+        let token = CancellationToken::new();
         let config = self.config.clone();
 
         // Spawn executor in background task
@@ -443,7 +445,7 @@ impl App {
             };
 
             // Execute the plan
-            match executor.execute_plan(&mut plan).await {
+            match executor.execute_plan(&mut plan, &token).await {
                 Ok(results) => {
                     let all_success = results.iter().all(|r| r.success);
                     if all_success {
