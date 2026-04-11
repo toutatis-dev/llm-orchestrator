@@ -218,5 +218,15 @@ mod tests {
 
         // Should fail because "main" branch doesn't exist, but structure is correct
         // In real usage, we'd create the base branch first
+        assert!(
+            worktree.is_err(),
+            "Should fail when base branch doesn't exist"
+        );
+        let err_msg = worktree.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("main") || err_msg.contains("branch"),
+            "Error should mention the missing branch: {}",
+            err_msg
+        );
     }
 }

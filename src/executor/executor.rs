@@ -1,7 +1,6 @@
 use crate::cancellation::CancellationToken;
 use crate::config::Config;
 use crate::core::{BatchStatus, ExecutionPlan, Task, TaskBatch, WorkerTier};
-use crate::executor::retry::{RetryHandler, RetryResult};
 use crate::executor::worktree::{WorktreeManager, WorkerWorktree};
 use crate::git::branch::BranchManager;
 use crate::models::openrouter::OpenRouterClient;

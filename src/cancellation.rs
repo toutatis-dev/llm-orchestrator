@@ -252,10 +252,12 @@ impl CheckpointManager {
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "json") {
+                let filename = path.file_name().unwrap_or_default().to_string_lossy();
+                // Skip plan files, only load checkpoint files
+                if filename.starts_with("plan-") {
+                    continue;
+                }
                 if let Ok(checkpoint) = Checkpoint::load(&path).await {
-                    if checkpoint.session_id.starts_with("checkpoint-") {
-                        continue; // Skip non-checkpoint files
-                    }
                     checkpoints.push(checkpoint);
                 }
             }
