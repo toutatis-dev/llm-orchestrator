@@ -64,11 +64,15 @@ impl WorktreeManager {
             .with_context(|| "Failed to create worktree parent directory")?;
 
         // Create the branch if it doesn't exist
-        let base_ref = self
-            .repo
-            .find_branch(base_branch, git2::BranchType::Local)?
-            .into_reference();
-        let base_commit = base_ref.peel_to_commit()?;
+        // Handle "HEAD" specially - resolve to current commit
+        let base_commit = if base_branch == "HEAD" {
+            self.repo.head()?.peel_to_commit()?
+        } else {
+            self.repo
+                .find_branch(base_branch, git2::BranchType::Local)?
+                .into_reference()
+                .peel_to_commit()?
+        };
 
         // Create branch
         let branch = self

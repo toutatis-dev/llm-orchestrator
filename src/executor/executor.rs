@@ -79,13 +79,19 @@ impl Executor {
                 ));
             }
 
-            // Get the base branch (last merged batch or HEAD)
+            // Get the base branch (last merged batch or current HEAD)
             let base_branch = batch.dependencies
                 .iter()
                 .filter_map(|dep_id| completed_batches.get(dep_id))
                 .last()
                 .cloned()
-                .unwrap_or_else(|| "HEAD".to_string());
+                .unwrap_or_else(|| {
+                    // Resolve HEAD to actual branch name for better tracking
+                    match self.branch_manager.head_sha() {
+                        Ok(sha) => sha,
+                        Err(_) => "HEAD".to_string(),
+                    }
+                });
 
             // Execute the batch
             let result = self.execute_batch(batch, &base_branch).await?;
