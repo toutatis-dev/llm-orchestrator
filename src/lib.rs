@@ -5,6 +5,7 @@
 //! to parallelize tasks and improve efficiency.
 
 pub mod api_key;
+pub mod cancellation;
 pub mod cli;
 pub mod config;
 pub mod core;
@@ -12,6 +13,7 @@ pub mod executor;
 pub mod git;
 pub mod models;
 pub mod orchestrator;
+pub mod rate_limit;
 pub mod tui;
 pub mod watcher;
 
