@@ -42,6 +42,7 @@ pub struct BatchResult {
 pub struct Executor {
     worktree_manager: WorktreeManager,
     branch_manager: BranchManager,
+    batch_merger: crate::executor::merger::BatchMerger,
     config: Config,
     session_id: String,
 }
@@ -51,10 +52,12 @@ impl Executor {
     pub fn new(repo_path: &Path, session_id: String, config: Config) -> Result<Self> {
         let worktree_manager = WorktreeManager::new(repo_path)?;
         let branch_manager = BranchManager::new(repo_path)?;
+        let batch_merger = crate::executor::merger::BatchMerger::new(repo_path)?;
 
         Ok(Self {
             worktree_manager,
             branch_manager,
+            batch_merger,
             config,
             session_id,
         })
@@ -241,8 +244,28 @@ impl Executor {
             });
         }
 
-        // All tasks succeeded - merge branches
-        let merged_branch = self.merge_batch_results(batch, &task_results, base_branch).await?;
+        // All tasks succeeded - merge branches using BatchMerger
+        let merge_result = self.batch_merger.merge_batch(
+            batch,
+            &task_results,
+            base_branch,
+            &self.session_id,
+        )?;
+
+        let merged_branch = match merge_result {
+            crate::executor::merger::MergeResult::Success { commit_sha } => {
+                tracing::info!("Batch {} merged successfully: {}", batch.id, commit_sha);
+                format!("orchestrator/{}/batch-{}-merged", self.session_id, batch.id)
+            }
+            crate::executor::merger::MergeResult::Conflict { files, message } => {
+                tracing::error!("Merge conflict in batch {}: {}", batch.id, message);
+                return Err(anyhow::anyhow!("Merge conflict: {:?}", files));
+            }
+            crate::executor::merger::MergeResult::Error { message } => {
+                tracing::error!("Merge error in batch {}: {}", batch.id, message);
+                return Err(anyhow::anyhow!("Merge error: {}", message));
+            }
+        };
 
         // Clean up worktrees and branches
         for worktree in worktrees {
@@ -257,50 +280,6 @@ impl Executor {
             merged_branch: Some(merged_branch),
             success: true,
         })
-    }
-
-    /// Merge all task results from a batch into a single branch
-    async fn merge_batch_results(
-        &mut self,
-        batch: &TaskBatch,
-        results: &[TaskResult],
-        base_branch: &str,
-    ) -> Result<String> {
-        let merged_branch = format!("orchestrator/{}/batch-{}-merged", self.session_id, batch.id);
-
-        // Create merged branch from base
-        self.branch_manager.create_branch(&merged_branch, base_branch)?;
-
-        // Merge each task's branch into the merged branch
-        for result in results {
-            if let Some(commit_sha) = &result.commit_sha {
-                let task_branch = format!(
-                    "orchestrator/{}/batch-{}-task-{}",
-                    self.session_id,
-                    batch.id,
-                    result.task_id
-                );
-
-                let message = format!(
-                    "[orchestrator] Merge task {}: {}\n\nCommit: {}",
-                    result.task_id,
-                    if result.success { "success" } else { "failed" },
-                    commit_sha
-                );
-
-                self.branch_manager
-                    .merge_branch(&task_branch, &message)
-                    .with_context(|| format!("Failed to merge task {} into batch merge", result.task_id))?;
-            }
-        }
-
-        tracing::info!(
-            "Created merged branch '{}' for batch {}",
-            merged_branch,
-            batch.id
-        );
-
-        Ok(merged_branch)
     }
 }
 
