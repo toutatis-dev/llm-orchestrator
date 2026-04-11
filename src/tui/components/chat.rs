@@ -7,6 +7,7 @@ use ratatui::{
     Frame,
 };
 
+#[derive(Clone)]
 pub struct ChatPanel {
     messages: Vec<ChatMessage>,
     scroll: usize,

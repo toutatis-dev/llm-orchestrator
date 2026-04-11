@@ -16,8 +16,8 @@ async fn main() -> anyhow::Result<()> {
     // Initialize terminal
     let mut terminal = init_terminal()?;
     
-    // Run TUI app
-    let mut app = App::new();
+    // Create and run TUI app
+    let mut app = App::new()?;
     let result = app.run(&mut terminal).await;
     
     // Restore terminal regardless of result
