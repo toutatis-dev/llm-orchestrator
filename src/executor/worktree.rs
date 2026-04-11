@@ -20,6 +20,13 @@ pub struct WorkerWorktree {
     pub branch: String,
 }
 
+impl WorkerWorktree {
+    /// Create a new WorkerWorktree
+    pub fn new(path: PathBuf, branch: String) -> Self {
+        Self { path, branch }
+    }
+}
+
 impl WorktreeManager {
     /// Create a new WorktreeManager for the given repository
     pub fn new(repo_path: &Path) -> Result<Self> {
@@ -100,11 +107,8 @@ impl WorktreeManager {
             worktree_path
         );
 
-        // The worktree exists on disk now; we don't need to keep the Worktree object
-        Ok(WorkerWorktree {
-            path: worktree_path,
-            branch: branch_name,
-        })
+        // The worktree exists on disk now
+        Ok(WorkerWorktree::new(worktree_path, branch_name))
     }
 
     /// Remove a worktree and its associated branch
@@ -122,6 +126,9 @@ impl WorktreeManager {
         branch
             .delete()
             .with_context(|| format!("Failed to delete branch '{}'", worktree.branch))?;
+
+        // Note: The Worktree object was dropped in create_worktree(), which pruned it from git's metadata.
+        // If we need explicit pruning, we would call self.repo.prune_worktrees(None) here.
 
         tracing::info!(
             "Removed worktree at {:?} and branch '{}'",
