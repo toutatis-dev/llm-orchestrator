@@ -56,6 +56,7 @@ pub struct App {
     pub last_tick: DateTime<Local>,
     pub config: Config,
     event_tx: mpsc::UnboundedSender<Event>,
+    event_rx: mpsc::UnboundedReceiver<Event>,
 }
 
 impl App {
@@ -64,7 +65,7 @@ impl App {
         let config = Config::load()?;
 
         // Create event channel for async operations
-        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         // Start in Discovery mode with welcome message
         let mut chat = ChatPanel::new();
@@ -81,6 +82,7 @@ impl App {
             last_tick: Local::now(),
             config,
             event_tx,
+            event_rx,
         })
     }
 
@@ -92,14 +94,24 @@ impl App {
             // Draw UI
             terminal.draw(|f| self.draw(f))?;
 
-            // Handle events
-            if let Some(event) = event_handler.next().await {
-                match event {
-                    Event::Key(key) => self.on_key(key).await,
-                    Event::Tick => self.on_tick(),
-                    Event::PlanGenerated(plan) => self.on_plan_generated(plan),
-                    Event::MessageReceived(msg) => self.on_message_received(msg),
-                    _ => {}
+            // Handle events from both input and async tasks
+            tokio::select! {
+                // Terminal input events
+                Some(event) = event_handler.next() => {
+                    match event {
+                        Event::Key(key) => self.on_key(key).await,
+                        Event::Tick => self.on_tick(),
+                        _ => {}
+                    }
+                }
+                // Async task events (plan generated, errors, etc.)
+                Some(event) = self.event_rx.recv() => {
+                    match event {
+                        Event::PlanGenerated(plan) => self.on_plan_generated(plan),
+                        Event::MessageReceived(msg) => self.on_message_received(msg),
+                        Event::ExecutionUpdate(update) => self.on_execution_update(update),
+                        _ => {}
+                    }
                 }
             }
         }
@@ -290,14 +302,20 @@ impl App {
                             let mut plan = std::mem::replace(plan, ExecutionPlan::new(String::new()));
                             plan.status = PlanStatus::Approved;
                             
+                            let session_id_clone = session_id.clone();
+                            let progress = ExecutionProgress {
+                                current_batch: 0,
+                                total_batches: plan.batches.len(),
+                                tasks_completed: 0,
+                                total_tasks: plan.batches.iter().map(|b| b.tasks.len()).sum(),
+                            };
+                            
+                            // Start execution
+                            self.start_execution(plan, session_id_clone);
+                            
                             self.state = AppState::Executing {
                                 session_id,
-                                progress: ExecutionProgress {
-                                    current_batch: 0,
-                                    total_batches: plan.batches.len(),
-                                    tasks_completed: 0,
-                                    total_tasks: plan.batches.iter().map(|b| b.tasks.len()).sum(),
-                                },
+                                progress,
                             };
                         } else {
                             wizard_state.approve_current();
@@ -375,8 +393,71 @@ impl App {
         };
     }
 
+    fn on_execution_update(&mut self, update: crate::tui::events::ExecutionUpdate) {
+        match &mut self.state {
+            AppState::Executing { progress, .. } => {
+                match update {
+                    crate::tui::events::ExecutionUpdate::BatchStarted { batch_id } => {
+                        progress.current_batch = batch_id;
+                        tracing::info!("Batch {} started", batch_id);
+                    }
+                    crate::tui::events::ExecutionUpdate::BatchCompleted { batch_id } => {
+                        tracing::info!("Batch {} completed", batch_id);
+                    }
+                    crate::tui::events::ExecutionUpdate::TaskCompleted { .. } => {
+                        progress.tasks_completed += 1;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                tracing::debug!("Received execution update in non-executing state");
+            }
+        }
+    }
+
     fn on_tick(&mut self) {
         // Periodic updates (e.g., checking for external file changes)
         self.last_tick = Local::now();
+    }
+
+    /// Start execution of the plan
+    fn start_execution(&mut self, mut plan: ExecutionPlan, session_id: String) {
+        use crate::executor::executor::Executor;
+        use std::sync::Arc;
+
+        let event_tx = self.event_tx.clone();
+        let config = self.config.clone();
+
+        // Spawn executor in background task
+        tokio::spawn(async move {
+            let repo_path = std::env::current_dir().unwrap_or_default();
+            let mut executor = match Executor::new(&repo_path, session_id.clone(), config) {
+                Ok(exec) => exec,
+                Err(e) => {
+                    let _ = event_tx.send(Event::MessageReceived(format!(
+                        "Failed to create executor: {}", e
+                    )));
+                    return;
+                }
+            };
+
+            // Execute the plan
+            match executor.execute_plan(&mut plan).await {
+                Ok(results) => {
+                    let all_success = results.iter().all(|r| r.success);
+                    if all_success {
+                        let _ = event_tx.send(Event::ExecutionUpdate(
+                            crate::tui::events::ExecutionUpdate::BatchCompleted { batch_id: 0 }
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx.send(Event::MessageReceived(format!(
+                        "Execution failed: {}", e
+                    )));
+                }
+            }
+        });
     }
 }
