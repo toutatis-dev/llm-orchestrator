@@ -5,7 +5,9 @@ pub mod progress;
 pub mod wizard;
 
 pub use chat::ChatPanel;
+pub use log::{LogEntry, LogLevel, LogPanel};
 pub use plan::PlanPanel;
+pub use progress::ProgressPanel;
 pub use wizard::{WizardAction, WizardPanel, WizardState};
 
 use ratatui::Frame;
