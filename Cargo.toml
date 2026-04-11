@@ -74,3 +74,6 @@ rand = "0.8"
 
 # Directory traversal
 walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.10"

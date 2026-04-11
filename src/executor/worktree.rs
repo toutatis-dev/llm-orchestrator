@@ -51,6 +51,9 @@ impl WorktreeManager {
             "orchestrator/{}/batch-{}-task-{}",
             session_id, batch_id, task_id
         );
+        // Worktree name must be a simple identifier (no slashes)
+        let worktree_name =
+            format!("orch-{}-b{}-t{}", session_id, batch_id, task_id).replace('/', "-");
         let worktree_path = self
             .base_path
             .join(session_id)
@@ -80,10 +83,10 @@ impl WorktreeManager {
         let mut opts = WorktreeAddOptions::new();
         opts.reference(Some(&branch_ref));
 
-        // Create worktree
+        // Create worktree (use simple name for worktree, branch reference for checkout)
         let _worktree = self
             .repo
-            .worktree(&branch_name, &worktree_path, Some(&opts))
+            .worktree(&worktree_name, &worktree_path, Some(&opts))
             .with_context(|| format!("Failed to create worktree at {:?}", worktree_path))?;
 
         tracing::info!(
