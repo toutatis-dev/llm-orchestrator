@@ -109,6 +109,7 @@ impl RateLimiter {
     where
         F: Fn() -> Fut,
         Fut: Future<Output = Result<T, E>>,
+        E: std::fmt::Display,
     {
         self.execute(|| async {
             match operation().await {
@@ -315,27 +316,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limit_retry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
         let limiter = RateLimiter::with_config(RateLimitConfig {
             max_retries: 2,
             initial_backoff_ms: 10,
             ..Default::default()
         });
 
-        let mut attempts = 0;
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_clone = attempts.clone();
         let result: Result<i32, RateLimitError> = limiter
-            .execute(|| async {
-                attempts += 1;
-                if attempts < 3 {
-                    Err(RateLimitError::RateLimited { retry_after: None })
-                } else {
-                    Ok(42)
+            .execute(move || {
+                let attempts = attempts_clone.clone();
+                async move {
+                    let count = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                    if count < 3 {
+                        Err(RateLimitError::RateLimited { retry_after: None })
+                    } else {
+                        Ok(42)
+                    }
                 }
             })
             .await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts, 3);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]

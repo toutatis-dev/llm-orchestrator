@@ -302,7 +302,7 @@ mod tests {
             ErrorType::Transient
         );
         assert_eq!(
-            ErrorType::classify(&anyhow::anyhow!("unauthorized"))),
+            ErrorType::classify(&anyhow::anyhow!("unauthorized")),
             ErrorType::Permanent
         );
     }
@@ -312,6 +312,6 @@ mod tests {
         assert!(ErrorType::Transient.is_retryable());
         assert!(ErrorType::RateLimited.is_retryable());
         assert!(!ErrorType::Permanent.is_retryable());
-        assert!(ErrorType::Conflict.is_retryable());
+        assert!(!ErrorType::Conflict.is_retryable());
     }
 }

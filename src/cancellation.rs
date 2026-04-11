@@ -1,4 +1,4 @@
-use crate::core::{BatchId, ExecutionPlan, PlanStatus};
+use crate::core::{BatchId, BatchStatus, ExecutionPlan, PlanStatus};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -188,12 +188,12 @@ impl CheckpointManager {
 
         // Find the last completed batch
         for batch in &plan.batches {
-            if batch.status == Some(PlanStatus::Completed) {
+            if batch.status == Some(BatchStatus::Completed) {
                 checkpoint.mark_batch_completed(
                     batch.id,
                     format!("orchestrator/{}/batch-{}-merged", session_id, batch.id),
                 );
-            } else if batch.status == Some(PlanStatus::InProgress) {
+            } else if batch.status == Some(BatchStatus::InProgress) {
                 checkpoint.set_current_batch(batch.id);
                 break;
             }
